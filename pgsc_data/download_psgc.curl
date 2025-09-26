@@ -1,0 +1,5 @@
+curl "https://psgc.thecodebit.digital/api/v1/region?page=1&limit=100000" -o pgsc_region.json
+curl "https://psgc.thecodebit.digital/api/v1/province?page=1&limit=100000000" -o pgsc_province.json
+curl "https://psgc.thecodebit.digital/api/v1/cityMunicipality?page=1&limit=1000000" -o pgsc_citymunicipality.json
+curl "https://psgc.thecodebit.digital/api/v1/submunicipality?page=1&limit=1000" -o pgsc_submunicipality.json
+curl "https://psgc.thecodebit.digital/api/v1/barangay?page=1&limit=100000000000000000" -o pgsc_barangay.json
