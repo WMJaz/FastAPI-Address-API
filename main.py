@@ -1,13 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, Request
 from fastapi import HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse,RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 import json
 from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
-
+# Serve all required middlewares and static files.
 app = FastAPI(title="Philippine Address API (PSGC)", version="1.0")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -15,6 +15,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.mount("/src/img", StaticFiles(directory="src/img"), name="img")
 
 # Load JSON data into memory
 DATA_DIR = Path(__file__).parent / "pgsc_data"
@@ -44,8 +45,12 @@ def homepage():
                 <title>{app.title}</title>
             </head>
             <body style="font-family: Arial, sans-serif; padding: 20px;">
-                <h1>🚀 {app.title}</h1>
-                <p>Welcome! This is a local PSGC-based geographic API service.</p>
+                <h1>
+                    <img src="/src/img/PAFHRMC.png" style="width:40px; height:40px; border-radius:50%; vertical-align:middle; margin-right:8px;">
+                    {app.title}
+                    <img src="/src/img/PAF.png" style="width:40px; height:40px; border-radius:50%; vertical-align:middle; margin-right:8px;">  
+                </h1>
+                <p>Welcome! This is a local PSGC-based geographic API service created for PAFHRMC.</p>
                 <p><b>Version:</b> {app.version}</p>
                 
                 <h2>Available Endpoints</h2>
@@ -55,9 +60,8 @@ def homepage():
                     <li><a href="/provinces" target="_blank">/provinces</a> – Get all provinces</li>
                     <li><a href="/cities" target="_blank">/cities</a> – Get all cities</li>
                     <li><a href="/submunicipalities" target="_blank">/submunicipalities</a> – Get all submunicipalities</li>
-                    <li><a href="/barangays" target="_blank">/barangays</a> – Get all barangays (paginated)</li>
+                    <li><a href="/barangays" target="_blank">/barangays</a> – Get all barangays <code>(with Limit Parameters, will crash it load all)</code>.</li>
                 </ul>
-
                 <h2>Interactive API Docs</h2>
                 <ul>
                     <li><a href="/docs" target="_blank">/docs</a> – Swagger UI</li>
@@ -173,7 +177,10 @@ def get_submunis_by_city(city_code: str):
 ################################ BARANGAY ################################
 # Get All Barangays
 @app.get("/barangays")
-def get_all_barangays(skip: int = 0, limit: int = 100):
+def get_all_barangays(request: Request, skip: int = 0, limit: int = 50):
+    # If no query parameters are passed at all → redirect
+    if not request.query_params:
+        return RedirectResponse(url=f"/barangays?limit={limit}")
     return BARANGAYS[skip: skip + limit]
 
 # Get Certain Barangay by Barangay Code
