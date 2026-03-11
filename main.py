@@ -56,6 +56,7 @@ def homepage():
                 <h2>Available HTTP Requests Endpoints:</h2>
                 <ul>
                     <li><a href="/health" target="_blank">/health</a> – API health check</li>
+                    <li><a href="/islands" target="_blank">/Island</a> – Get all Island (Just a Text List)</li>
                     <li><a href="/regions" target="_blank">/regions</a> – Get all regions</li>
                     <li><a href="/provinces" target="_blank">/provinces</a> – Get all provinces</li>
                     <li><a href="/cities" target="_blank">/cities</a> – Get all cities</li>
@@ -83,7 +84,22 @@ def root():
         "version": app.version
     }
 
+############################## Island ###############################
+# Get All Island
+@app.get("/islands")
+def get_island_groups():
+    islands = sorted({r["islandGroup"] for r in REGIONS if r.get("islandGroup")})
+    return islands
 
+# Get All Region by Island
+@app.get("/islands/{island}/regions")
+def get_regions_by_island(island: str):
+    regions = [r for r in REGIONS if r.get("islandGroup", "").lower() == island.lower()]
+    
+    if not regions:
+        raise HTTPException(status_code=404, detail="Island group not found")
+    
+    return regions
 
 ############################## REGION ###############################
 # Get All Regions
@@ -171,7 +187,6 @@ def get_submunis_by_region(region_code: str):
 @app.get("/cities/{city_code}/submunicipalities")
 def get_submunis_by_city(city_code: str):
     return [s for s in SUBMUNIS if s["cityMunicipalityCode"] == city_code]
-
 
 
 ################################ BARANGAY ################################
