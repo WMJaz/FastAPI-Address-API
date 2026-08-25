@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# PyInstaller build artifacts (desktop GUI wrapper, not needed for web deploy)
+build/
+dist/
+
+# Environment variables
+.env
