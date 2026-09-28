@@ -1,21 +1,49 @@
-from fastapi import FastAPI, Query, Request
-from fastapi import HTTPException
-from fastapi.responses import HTMLResponse,RedirectResponse
-from fastapi.middleware.cors import CORSMiddleware
-import json
+import logging
+import os
 from pathlib import Path
+import json
+
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-# Serve all required middlewares and static files.
-app = FastAPI(title="Philippine Address API (PSGC)", version="1.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from security import env_flag, require_api_key
+
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="[%(levelname)s] %(asctime)s %(name)s - %(message)s")
+
+# Swagger / ReDoc / landing page are development helpers only.
+ENABLE_DOCS = env_flag("ENABLE_DOCS", False)
+
+app = FastAPI(
+    title="Philippine Address API (PSGC)",
+    version="1.1",
+    docs_url="/docs" if ENABLE_DOCS else None,
+    redoc_url="/redoc" if ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_DOCS else None,
 )
-app.mount("/src/img", StaticFiles(directory="src/img"), name="img")
+
+# Server-to-server service: no CORS by default. Only enable for explicit origins.
+_cors_origins = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET"],
+        allow_headers=["X-Internal-Key", "Content-Type"],
+    )
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+# Every data route requires the shared X-Internal-Key; only /ping is public.
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 # Load JSON data into memory
 DATA_DIR = Path(__file__).parent / "pgsc_data"
@@ -37,47 +65,29 @@ with open(DATA_DIR / "pgsc_barangay.json", "r", encoding="utf-8") as f:
 
 
 
-@app.get("/", response_class=HTMLResponse)
-def homepage():
-    return f"""
-        <html>
-            <head>
-                <title>{app.title}</title>
-            </head>
-            <body style="font-family: Arial, sans-serif; padding: 20px;">
-                <h1>
-                    <img src="/src/img/PAFHRMC.png" style="width:40px; height:40px; border-radius:50%; vertical-align:middle; margin-right:8px;">
-                    {app.title}
-                    <img src="/src/img/PAF.png" style="width:40px; height:40px; border-radius:50%; vertical-align:middle; margin-right:8px;">  
-                </h1>
-                <p>Welcome! This is a local PSGC-based geographic API service created for PAFHRMC.</p>
-                <p><b>Version:</b> {app.version}</p>
-                
-                <h2>Available HTTP Requests Endpoints:</h2>
-                <ul>
-                    <li><a href="/health" target="_blank">/health</a> – API health check</li>
-                    <li><a href="/islands" target="_blank">/Island</a> – Get all Island (Just a Text List)</li>
-                    <li><a href="/regions" target="_blank">/regions</a> – Get all regions</li>
-                    <li><a href="/provinces" target="_blank">/provinces</a> – Get all provinces</li>
-                    <li><a href="/cities" target="_blank">/cities</a> – Get all cities</li>
-                    <li><a href="/submunicipalities" target="_blank">/submunicipalities</a> – Get all submunicipalities</li>
-                    <li><a href="/barangays" target="_blank">/barangays</a> – Get all barangays <code>(with Limit Parameters, will crash it load all)</code>.</li>
-                </ul>
-                <h2>Interactive API Docs</h2>
-                <ul>
-                    <li><a href="/docs" target="_blank">/docs</a> – Swagger UI</li>
-                    <li><a href="/redoc" target="_blank">/redoc</a> – ReDoc UI</li>
-                </ul>
+if ENABLE_DOCS:
+    app.mount("/src/img", StaticFiles(directory="src/img"), name="img")
 
-                <p style="margin-top:20px; font-size: 12px; color: gray;">
-                    Powered by FastAPI · PSGC JSON Data
-                </p>
-            </body>
-        </html>
-    """
-    
+    @app.get("/", response_class=HTMLResponse)
+    def homepage():
+        return f"""
+        <html><head><title>{app.title}</title></head>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h1>{app.title}</h1>
+            <p>Development mode (ENABLE_DOCS=true). All endpoints except /ping need the
+            <code>X-Internal-Key</code> header. Use the Authorize button in <a href="/docs">/docs</a>.</p>
+        </body></html>
+        """
+
+
+# Liveness (no data, no side effects)
+@app.get("/ping")
+def ping():
+    return {"status": "ok"}
+
+
 # Checks API Health
-@app.get("/health")
+@router.get("/health")
 def root():
     return {
         "message": f"Hi, {app.title} is working!",
@@ -86,13 +96,13 @@ def root():
 
 ############################## Island ###############################
 # Get All Island
-@app.get("/islands")
+@router.get("/islands")
 def get_island_groups():
     islands = sorted({r["islandGroup"] for r in REGIONS if r.get("islandGroup")})
     return islands
 
 # Get All Region by Island
-@app.get("/islands/{island}/regions")
+@router.get("/islands/{island}/regions")
 def get_regions_by_island(island: str):
     regions = [r for r in REGIONS if r.get("islandGroup", "").lower() == island.lower()]
     
@@ -103,12 +113,12 @@ def get_regions_by_island(island: str):
 
 ############################## REGION ###############################
 # Get All Regions
-@app.get("/regions")
+@router.get("/regions")
 def get_all_regions():
     return REGIONS
 
 # Get Certain Region by Region Code
-@app.get("/regions/{region_code}/getcertain")
+@router.get("/regions/{region_code}/getcertain")
 def get_certain_region(region_code: str):
     region = next((r for r in REGIONS if r["psgc10DigitCode"] == region_code), None)
     if not region:
@@ -119,12 +129,12 @@ def get_certain_region(region_code: str):
 
 ############################## PROVINCE ###############################
 # Get All Provinces
-@app.get("/provinces")
+@router.get("/provinces")
 def get_all_provinces():
     return PROVINCES
 
 # Get Certain Province by Province Code
-@app.get("/provinces/{province_code}/getcertain")
+@router.get("/provinces/{province_code}/getcertain")
 def get_certain_province(province_code: str):
     province = next((p for p in PROVINCES if p["psgc10DigitCode"] == province_code), None)
     if not province:
@@ -132,7 +142,7 @@ def get_certain_province(province_code: str):
     return province
 
 # Get Provinces by Region Code
-@app.get("/regions/{region_code}/provinces")
+@router.get("/regions/{region_code}/provinces")
 def get_provinces_by_region(region_code: str):
     return [p for p in PROVINCES if p["regionCode"] == region_code]
 
@@ -140,12 +150,12 @@ def get_provinces_by_region(region_code: str):
 
 ########################## CITY MUNICIPALITY ###########################
 # Get All Cities
-@app.get("/cities")
+@router.get("/cities")
 def get_all_cities():
     return CITIES
 
 # Get Certain City by City Code
-@app.get("/cities/{city_code}/getcertain")
+@router.get("/cities/{city_code}/getcertain")
 def get_certain_city(city_code: str):
     city = next((c for c in CITIES if c["psgc10DigitCode"] == city_code), None)
     if not city:
@@ -153,12 +163,12 @@ def get_certain_city(city_code: str):
     return city
 
 # Get Cities by Region Code
-@app.get("/regions/{region_code}/cities")
+@router.get("/regions/{region_code}/cities")
 def get_cities_by_region(region_code: str):
     return [c for c in CITIES if c["regionCode"] == region_code]
 
 # Get Cities by Province Code
-@app.get("/provinces/{province_code}/cities")
+@router.get("/provinces/{province_code}/cities")
 def get_cities_by_province(province_code: str):
     return [c for c in CITIES if c["provinceCode"] == province_code]
 
@@ -166,12 +176,12 @@ def get_cities_by_province(province_code: str):
 
 ########################### SUB MUNICIPALITY ############################
 # Get all Sub Municipalities
-@app.get("/submunicipalities")
+@router.get("/submunicipalities")
 def get_all_submunicipalities():
     return SUBMUNIS
 
 # Get Certain Sub Municipality by Submunicipality Code
-@app.get("/submunicipalities/{submuni_code}/getcertain")
+@router.get("/submunicipalities/{submuni_code}/getcertain")
 def get_certain_submunicipality(submuni_code: str):
     submuni = next((s for s in SUBMUNIS if s["psgc10DigitCode"] == submuni_code), None)
     if not submuni:
@@ -179,27 +189,27 @@ def get_certain_submunicipality(submuni_code: str):
     return submuni
 
 # Get Submunicipalities by Region Code
-@app.get("/regions/{region_code}/submunicipalities")
+@router.get("/regions/{region_code}/submunicipalities")
 def get_submunis_by_region(region_code: str):
     return [s for s in SUBMUNIS if s["regionCode"] == region_code]
 
 # Get Submunicipalities by City Code
-@app.get("/cities/{city_code}/submunicipalities")
+@router.get("/cities/{city_code}/submunicipalities")
 def get_submunis_by_city(city_code: str):
     return [s for s in SUBMUNIS if s["cityMunicipalityCode"] == city_code]
 
 
 ################################ BARANGAY ################################
 # Get All Barangays
-@app.get("/barangays")
-def get_all_barangays(request: Request, skip: int = 0, limit: int = 50):
+@router.get("/barangays")
+def get_all_barangays(request: Request, skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1000)):
     # If no query parameters are passed at all → redirect
     if not request.query_params:
         return RedirectResponse(url=f"/barangays?limit={limit}")
     return BARANGAYS[skip: skip + limit]
 
 # Get Certain Barangay by Barangay Code
-@app.get("/barangays/{barangay_code}/getcertain")
+@router.get("/barangays/{barangay_code}/getcertain")
 def get_certain_barangay(barangay_code: str):
     barangay = next((b for b in BARANGAYS if b["psgc10DigitCode"] == barangay_code), None)
     if not barangay:
@@ -207,11 +217,14 @@ def get_certain_barangay(barangay_code: str):
     return barangay
 
 # Get Barangays by City Code
-@app.get("/cities/{city_code}/barangays")
+@router.get("/cities/{city_code}/barangays")
 def get_barangays_by_city(city_code: str):
     return [b for b in BARANGAYS if b["cityMunicipalityCode"] == city_code]
 
 # Get Barangays by Submunicipality Code
-@app.get("/submunicipalities/{submuni_code}/barangays")
+@router.get("/submunicipalities/{submuni_code}/barangays")
 def get_barangays_by_submuni(submuni_code: str):
     return [b for b in BARANGAYS if b.get("subMunicipalityCode") == submuni_code]
+
+
+app.include_router(router)

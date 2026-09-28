@@ -65,7 +65,7 @@ def run_api():
                 return
 
             api_process = subprocess.Popen(
-                [python_executable, "-m", "uvicorn", f"{main_path}:app", "--host", "0.0.0.0", "--port", "8001"],
+                [python_executable, "-m", "uvicorn", f"{main_path}:app", "--host", "127.0.0.1", "--port", "8001"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
